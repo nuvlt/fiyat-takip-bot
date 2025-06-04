@@ -1,3 +1,17 @@
+from flask import Flask
+import threading
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot aktif!"
+
+# Aşağıdaki kod en alta eklenmeli:
+if __name__ == "__main__":
+    threading.Thread(target=main).start()
+    app.run(host="0.0.0.0", port=10000)
+
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 from tinydb import TinyDB
 import os
