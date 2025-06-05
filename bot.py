@@ -7,20 +7,20 @@ import requests
 from bs4 import BeautifulSoup
 import time
 
-# Flask uygulaması (Render'da ayakta kalmak için)
+# Flask (Render botu ayakta tutmak için)
 app = Flask(__name__)
 
 @app.route('/')
 def home():
     return "Bot aktif!"
 
-# Ortam değişkeninden token'ı al
+# Ortam değişkeni
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 # Veritabanı
 db = TinyDB("data.json")
 
-# Telegram bot komutları
+# Telegram komutları
 def start(update, context):
     update.message.reply_text("👋 Merhaba! Hepsiburada veya Trendyol ürün linki gönder, fiyatı takip edelim!")
 
@@ -32,7 +32,7 @@ def handle_message(update, context):
     chat_id = update.message.chat_id
 
     if is_valid_url(url):
-        # Varsa tekrar eklenmesin
+        # Aynı kullanıcı aynı linki tekrar eklemesin
         existing = db.search((TinyDB.table('default')['chat_id'] == chat_id) & (TinyDB.table('default')['url'] == url))
         if not existing:
             db.insert({"chat_id": chat_id, "url": url})
@@ -40,9 +40,9 @@ def handle_message(update, context):
         else:
             update.message.reply_text("🔁 Bu ürün zaten takibe alınmış.")
     else:
-        update.message.reply_text("❌ Sadece Hepsiburada veya Trendyol linklerini gönderebilirsiniz.")
+        update.message.reply_text("❌ Lütfen sadece Hepsiburada veya Trendyol ürün linki gönderin.")
 
-# Fiyat çekme (şimdilik sadece Hepsiburada için)
+# Fiyat çekme fonksiyonları
 def scrape_price_hepsiburada(url):
     headers = {
         "User-Agent": "Mozilla/5.0"
@@ -56,46 +56,64 @@ def scrape_price_hepsiburada(url):
             price = f"{tag.text.strip()}.{frac.text.strip()}"
             return float(price.replace(".", "").replace(",", "."))
     except Exception as e:
-        print("Scrape error:", e)
+        print("Hepsiburada scrape error:", e)
     return None
 
-# Arka planda fiyat kontrolü
+def scrape_price_trendyol(url):
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
+        price_tag = soup.find("span", class_="prc-dsc")
+        if not price_tag:
+            price_tag = soup.find("span", class_="prc-org")
+        if price_tag:
+            price_text = price_tag.text.strip().replace("TL", "").replace(".", "").replace(",", ".")
+            return float(price_text)
+    except Exception as e:
+        print("Trendyol scrape error:", e)
+    return None
+
+# Fiyat kontrol fonksiyonu (arka planda döner)
 def check_prices():
     while True:
-        print("🔄 Fiyat kontrolü başladı...")
+        print("🔄 Fiyat kontrolü başlıyor...")
         for entry in db.all():
             url = entry["url"]
             chat_id = entry["chat_id"]
 
             if "hepsiburada.com" in url:
                 price = scrape_price_hepsiburada(url)
+            elif "trendyol.com" in url:
+                price = scrape_price_trendyol(url)
             else:
-                continue  # Trendyol desteklenmiyor (şimdilik)
+                continue
 
             if price is None:
-                print("❌ Fiyat çekilemedi:", url)
+                print("⚠️ Fiyat alınamadı:", url)
                 continue
 
-            # İlk defa kayıt yapılacaksa
-            if 'price' not in entry:
-                db.update({'price': price}, doc_ids=[entry.doc_id])
+            if "price" not in entry:
+                db.update({"price": price}, doc_ids=[entry.doc_id])
                 continue
 
-            old_price = entry['price']
+            old_price = entry["price"]
             if price < old_price:
                 try:
                     updater.bot.send_message(
                         chat_id=chat_id,
                         text=f"📉 Fiyat düştü!\n{url}\n\n💸 Eski: {old_price} TL\n🆕 Yeni: {price} TL"
                     )
-                    db.update({'price': price}, doc_ids=[entry.doc_id])
+                    db.update({"price": price}, doc_ids=[entry.doc_id])
                 except Exception as e:
                     print("Bildirim hatası:", e)
 
-        print("⏸️ Kontrol tamamlandı. 6 saat uyku...")
+        print("⏸️ Kontrol tamamlandı. 6 saat bekleniyor...")
         time.sleep(21600)  # 6 saat
 
-# Telegram botu başlat
+# Telegram bot başlatma
 def main():
     global updater
     updater = Updater(TOKEN, use_context=True)
@@ -107,12 +125,12 @@ def main():
     updater.start_polling()
     print("🤖 Bot çalışıyor...")
 
-    # Arka planda fiyat kontrol thread'i başlat
+    # Fiyat kontrol döngüsünü başlat
     threading.Thread(target=check_prices).start()
 
     updater.idle()
 
-# Hem Flask hem Telegram botu çalıştır
+# Ana giriş
 if __name__ == "__main__":
     threading.Thread(target=main).start()
     app.run(host="0.0.0.0", port=10000)
