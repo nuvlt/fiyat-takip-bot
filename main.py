@@ -131,6 +131,16 @@ def main():
     updater.idle()
 
 # Ana giriş
-if __name__ == "__main__":
+from flask import Flask
+import os
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return 'Bot aktif!'
+
+if __name__ == '__main__':
     threading.Thread(target=main).start()
-    app.run(host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
